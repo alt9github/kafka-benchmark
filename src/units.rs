@@ -1,5 +1,3 @@
-use rdkafka::util::duration_to_millis;
-
 use std::fmt;
 use std::ops::{Add, AddAssign, Div};
 use std::time::Duration;
@@ -14,13 +12,11 @@ pub struct Seconds(pub Duration);
 impl fmt::Display for Seconds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if f.alternate() {
-            write!(f, "{:.3}", duration_to_millis(self.0) as f64 / 1000.0)
+            let duration = self.0;
+            write!(f, "{:.3}", duration.as_millis() as f64 / 1000.0)
         } else {
-            write!(
-                f,
-                "{:.3} seconds",
-                duration_to_millis(self.0) as f64 / 1000.0
-            )
+            let duration = self.0;
+            write!(f, "{:.3} seconds", duration.as_millis() as f64 / 1000.0)
         }
     }
 }
@@ -162,7 +158,8 @@ impl Div<Seconds> for Bytes {
 
 impl<T: Div<f64, Output = T> + fmt::Display + Copy> fmt::Display for Rate<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let duration_s = duration_to_millis(self.duration) as f64 / 1000f64;
+        let duration = self.duration;
+        let duration_s = duration.as_millis() as f64 / 1000f64;
         if f.alternate() {
             write!(f, "{:#}", self.amount / duration_s)
         } else {
