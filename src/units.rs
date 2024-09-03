@@ -16,7 +16,11 @@ impl fmt::Display for Seconds {
         if f.alternate() {
             write!(f, "{:.3}", duration_to_millis(self.0) as f64 / 1000.0)
         } else {
-            write!(f, "{:.3} seconds", duration_to_millis(self.0) as f64 / 1000.0)
+            write!(
+                f,
+                "{:.3} seconds",
+                duration_to_millis(self.0) as f64 / 1000.0
+            )
         }
     }
 }
@@ -75,9 +79,9 @@ impl fmt::Display for Messages {
 //
 // ********** BYTES **********
 //
-const GB: f64 = (1<<30) as f64;
-const MB: f64 = (1<<20) as f64;
-const KB: f64 = (1<<10) as f64;
+const GB: f64 = (1 << 30) as f64;
+const MB: f64 = (1 << 20) as f64;
+const KB: f64 = (1 << 10) as f64;
 
 #[derive(Copy, Clone, Debug, PartialOrd, PartialEq)]
 pub struct Bytes(pub f64);
@@ -156,7 +160,7 @@ impl Div<Seconds> for Bytes {
     }
 }
 
-impl<T: Div<f64, Output=T> + fmt::Display + Copy> fmt::Display for Rate<T> {
+impl<T: Div<f64, Output = T> + fmt::Display + Copy> fmt::Display for Rate<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let duration_s = duration_to_millis(self.duration) as f64 / 1000f64;
         if f.alternate() {
@@ -166,4 +170,3 @@ impl<T: Div<f64, Output=T> + fmt::Display + Copy> fmt::Display for Rate<T> {
         }
     }
 }
-

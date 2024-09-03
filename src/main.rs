@@ -21,7 +21,8 @@ fn main() {
         (@arg benchmark_type: +takes_value +required "Benchmark type ('producer' or 'consumer')")
         (@arg config: +takes_value +required "The configuration file")
         (@arg scenario: +takes_value +required "The scenario you want to execute")
-    ).get_matches();
+    )
+    .get_matches();
 
     env_logger::init();
 

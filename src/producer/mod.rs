@@ -1,20 +1,20 @@
 use futures::{self, Future};
-use rdkafka::ClientContext;
 use rdkafka::error::{KafkaError, RDKafkaError};
 use rdkafka::producer::future_producer::DeliveryFuture;
 use rdkafka::producer::{BaseProducer, DeliveryResult, FutureProducer, ProducerContext};
+use rdkafka::ClientContext;
 
 use std::cmp;
 use std::iter::{IntoIterator, Iterator};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 mod content;
 
 use self::content::CachedMessages;
-use super::config::{ProducerBenchmark, ProducerType, ProducerScenario};
+use super::config::{ProducerBenchmark, ProducerScenario, ProducerType};
 use super::units::{Bytes, Messages, Seconds};
 
 struct BenchmarkProducerContext {
@@ -48,7 +48,8 @@ fn base_producer_thread(
 ) -> ThreadStats {
     let producer_context = BenchmarkProducerContext::new();
     let failure_counter = Arc::clone(&producer_context.failure_counter);
-    let producer: BaseProducer<BenchmarkProducerContext> = scenario.client_config()
+    let producer: BaseProducer<BenchmarkProducerContext> = scenario
+        .client_config()
         .create_with_context(producer_context)
         .expect("Producer creation failed");
     producer
@@ -63,7 +64,11 @@ fn base_producer_thread(
         scenario.message_count / scenario.threads
     };
     let start = Instant::now();
-    for (count, content) in cache.into_iter().take(per_thread_messages as usize).enumerate() {
+    for (count, content) in cache
+        .into_iter()
+        .take(per_thread_messages as usize)
+        .enumerate()
+    {
         loop {
             match producer.send_copy::<[u8], [u8]>(
                 &scenario.topic,
@@ -113,8 +118,10 @@ fn future_producer_thread(
     scenario: &ProducerScenario,
     cache: &CachedMessages,
 ) -> ThreadStats {
-    let producer: FutureProducer<_> = scenario.client_config()
-        .create().expect("Producer creation failed");
+    let producer: FutureProducer<_> = scenario
+        .client_config()
+        .create()
+        .expect("Producer creation failed");
     let _ = producer
         .send_copy::<str, str>(&scenario.topic, None, Some("warmup"), None, None, 1000)
         .wait();
@@ -127,7 +134,11 @@ fn future_producer_thread(
     let start = Instant::now();
     let mut failures = 0;
     let mut futures = Vec::with_capacity(1_000_000);
-    for (count, content) in cache.into_iter().take(per_thread_messages as usize).enumerate() {
+    for (count, content) in cache
+        .into_iter()
+        .take(per_thread_messages as usize)
+        .enumerate()
+    {
         futures.push(producer.send_copy::<[u8], [u8]>(
             &scenario.topic,
             Some(count as i32 % 3),
@@ -165,10 +176,12 @@ pub fn run(config: &ProducerBenchmark, scenario_name: &str) {
             .map(|thread_id| {
                 let scenario = scenario.clone();
                 let cache = Arc::clone(&cache);
-                thread::spawn(move || {
-                    match scenario.producer_type {
-                        ProducerType::BaseProducer => base_producer_thread(thread_id, &scenario, &cache),
-                        ProducerType::FutureProducer => future_producer_thread(thread_id, &scenario, &cache),
+                thread::spawn(move || match scenario.producer_type {
+                    ProducerType::BaseProducer => {
+                        base_producer_thread(thread_id, &scenario, &cache)
+                    }
+                    ProducerType::FutureProducer => {
+                        future_producer_thread(thread_id, &scenario, &cache)
                     }
                 })
             })
@@ -185,7 +198,6 @@ pub fn run(config: &ProducerBenchmark, scenario_name: &str) {
     }
     benchmark_stats.print();
 }
-
 
 #[derive(Debug)]
 pub struct ThreadStats {

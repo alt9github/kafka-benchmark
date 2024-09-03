@@ -5,7 +5,6 @@ use rdkafka::ClientConfig;
 use std::collections::HashMap;
 use std::fs::File;
 
-
 fn map_to_client_config(config_map: &HashMap<String, String>) -> ClientConfig {
     config_map
         .iter()
@@ -16,12 +15,12 @@ fn map_to_client_config(config_map: &HashMap<String, String>) -> ClientConfig {
 }
 
 fn or_expect<T: Clone>(first: &Option<T>, second: &Option<T>, name: &str) -> T {
-    first.as_ref()
+    first
+        .as_ref()
         .cloned()
         .or_else(|| second.clone())
         .expect(&format!("Missing configuration parameter: {}", name))
 }
-
 
 //
 // ********** PRODUCER CONFIG **********
@@ -74,7 +73,10 @@ pub struct ProducerScenario {
 }
 
 impl ProducerScenario {
-    fn from_file_config(default: &ProducerScenarioFileConfig, scenario: &ProducerScenarioFileConfig) -> ProducerScenario {
+    fn from_file_config(
+        default: &ProducerScenarioFileConfig,
+        scenario: &ProducerScenarioFileConfig,
+    ) -> ProducerScenario {
         let mut producer_config = default.producer_config.clone().unwrap_or_default();
         if let Some(ref config) = scenario.producer_config {
             for (key, value) in config {
@@ -85,12 +87,32 @@ impl ProducerScenario {
             panic!("No producer configuration provided")
         }
         ProducerScenario {
-            repeat_times: or_expect(&scenario.repeat_times, &default.repeat_times, "repeat_times"),
-            repeat_pause: or_expect(&scenario.repeat_pause, &default.repeat_pause, "repeat_pause"),
+            repeat_times: or_expect(
+                &scenario.repeat_times,
+                &default.repeat_times,
+                "repeat_times",
+            ),
+            repeat_pause: or_expect(
+                &scenario.repeat_pause,
+                &default.repeat_pause,
+                "repeat_pause",
+            ),
             threads: or_expect(&scenario.threads, &default.threads, "threads"),
-            producer_type: or_expect(&scenario.producer_type, &default.producer_type, "producer_type"),
-            message_size: or_expect(&scenario.message_size, &default.message_size, "message_size"),
-            message_count: or_expect(&scenario.message_count, &default.message_count, "message_count"),
+            producer_type: or_expect(
+                &scenario.producer_type,
+                &default.producer_type,
+                "producer_type",
+            ),
+            message_size: or_expect(
+                &scenario.message_size,
+                &default.message_size,
+                "message_size",
+            ),
+            message_count: or_expect(
+                &scenario.message_count,
+                &default.message_count,
+                "message_count",
+            ),
             topic: or_expect(&scenario.topic, &default.topic, "topic"),
             producer_config,
         }
@@ -111,13 +133,19 @@ impl ProducerBenchmark {
         let raw_config = ProducerBenchmarkFileConfig::from_file(path);
         let defaults = raw_config.default;
         ProducerBenchmark {
-            scenarios: raw_config.scenarios.into_iter()
-                .map(|(name, scenario)| (name, ProducerScenario::from_file_config(&defaults, &scenario)))
-                .collect()
+            scenarios: raw_config
+                .scenarios
+                .into_iter()
+                .map(|(name, scenario)| {
+                    (
+                        name,
+                        ProducerScenario::from_file_config(&defaults, &scenario),
+                    )
+                })
+                .collect(),
         }
     }
 }
-
 
 //
 // ********** CONSUMER CONFIG **********
@@ -166,7 +194,10 @@ pub struct ConsumerScenario {
 }
 
 impl ConsumerScenario {
-    fn from_file_config(default: &ConsumerScenarioFileConfig, scenario: &ConsumerScenarioFileConfig) -> ConsumerScenario {
+    fn from_file_config(
+        default: &ConsumerScenarioFileConfig,
+        scenario: &ConsumerScenarioFileConfig,
+    ) -> ConsumerScenario {
         let mut consumer_config = default.consumer_config.clone().unwrap_or_default();
         if let Some(ref config) = scenario.consumer_config {
             for (key, value) in config {
@@ -177,10 +208,22 @@ impl ConsumerScenario {
             panic!("No consumer configuration provided")
         }
         ConsumerScenario {
-            repeat_times: or_expect(&scenario.repeat_times, &default.repeat_times, "repeat_times"),
-            repeat_pause: or_expect(&scenario.repeat_pause, &default.repeat_pause, "repeat_pause"),
+            repeat_times: or_expect(
+                &scenario.repeat_times,
+                &default.repeat_times,
+                "repeat_times",
+            ),
+            repeat_pause: or_expect(
+                &scenario.repeat_pause,
+                &default.repeat_pause,
+                "repeat_pause",
+            ),
             consumer_type: or_expect(&scenario.consumer_type, &default.consumer_type, "consumer"),
-            message_limit: or_expect(&scenario.message_limit, &default.message_limit, "message_limit"),
+            message_limit: or_expect(
+                &scenario.message_limit,
+                &default.message_limit,
+                "message_limit",
+            ),
             topic: or_expect(&scenario.topic, &default.topic, "topic"),
             consumer_config,
         }
@@ -200,9 +243,16 @@ impl ConsumerBenchmark {
         let raw_config = ConsumerBenchmarkFileConfig::from_file(path);
         let defaults = raw_config.default;
         ConsumerBenchmark {
-            scenarios: raw_config.scenarios.into_iter()
-                .map(|(name, scenario)| (name, ConsumerScenario::from_file_config(&defaults, &scenario)))
-                .collect()
+            scenarios: raw_config
+                .scenarios
+                .into_iter()
+                .map(|(name, scenario)| {
+                    (
+                        name,
+                        ConsumerScenario::from_file_config(&defaults, &scenario),
+                    )
+                })
+                .collect(),
         }
     }
 }
