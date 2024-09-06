@@ -1,14 +1,13 @@
 use super::config::{ConsumerBenchmark, ConsumerScenario, ConsumerType};
 use super::units::{Bytes, Messages, Seconds};
 
-use futures::Stream;
+use futures::StreamExt;
 use rdkafka::config::FromClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::error::KafkaError;
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-use std::u64;
 
 struct ConsumerBenchmarkStats {
     messages: Messages,
@@ -122,39 +121,42 @@ fn run_stream_consumer_benchmark(scenario: &ConsumerScenario) -> ConsumerBenchma
         scenario.message_limit as u64
     };
 
-    let mut start_time = Instant::now();
-    let mut messages = 0;
-    let mut bytes = 0;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
 
-    for message in consumer.start().wait() {
-        match message {
-            Err(e) => {
-                println!("Error while reading from stream: {:?}", e);
-            }
-            Ok(Ok(message)) => {
-                if messages == 0 {
-                    println!("First message received");
-                    start_time = Instant::now();
-                }
-                if messages >= limit {
-                    break;
-                }
-                messages += 1;
-                bytes += message.payload_len() + message.key_len();
-            }
-            Ok(Err(KafkaError::PartitionEOF(p))) => {
-                partition_eof.insert(p);
-                if partition_eof.len() >= partition_count {
-                    break;
-                }
-            }
-            Ok(Err(e)) => {
-                println!("Kafka error: {}", e);
-            }
-        };
-    }
+    runtime.block_on(async {
+        let mut start_time = Instant::now();
+        let mut messages = 0;
+        let mut bytes = 0;
 
-    ConsumerBenchmarkStats::new(messages, bytes as u64, start_time.elapsed())
+        while let Some(result) = consumer.stream().next().await {
+            match result {
+                Err(KafkaError::PartitionEOF(p)) => {
+                    partition_eof.insert(p);
+                    if partition_eof.len() >= partition_count {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    println!("Error while reading from stream: {:?}", e);
+                }
+                Ok(message) => {
+                    if messages == 0 {
+                        println!("First message received");
+                        start_time = Instant::now();
+                    }
+                    if messages >= limit {
+                        break;
+                    }
+                    messages += 1;
+                    bytes += message.payload_len() + message.key_len();
+                }
+            };
+        }
+        ConsumerBenchmarkStats::new(messages, bytes as u64, start_time.elapsed())
+    })
 }
 
 pub fn run(config: &ConsumerBenchmark, scenario_name: &str) {

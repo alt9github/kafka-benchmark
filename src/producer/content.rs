@@ -1,4 +1,4 @@
-use rand::{self, Rng};
+use rand::Rng;
 
 pub struct CachedMessages(Vec<Vec<u8>>);
 

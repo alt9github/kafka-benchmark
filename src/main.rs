@@ -1,18 +1,9 @@
-#[macro_use]
-extern crate clap;
-extern crate env_logger;
-extern crate futures;
-extern crate rand;
-extern crate rdkafka;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_yaml;
-
 mod config;
 mod consumer;
 mod producer;
 mod units;
 
+use clap::clap_app;
 use config::{ConsumerBenchmark, ProducerBenchmark};
 
 fn main() {

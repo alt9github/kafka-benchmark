@@ -1,21 +1,22 @@
+use super::config::{ProducerBenchmark, ProducerScenario, ProducerType};
+use super::units::{Bytes, Messages, Seconds};
+use content::CachedMessages;
 use futures::{self, Future};
-use rdkafka::error::{KafkaError, RDKafkaError};
-use rdkafka::producer::future_producer::DeliveryFuture;
-use rdkafka::producer::{BaseProducer, DeliveryResult, FutureProducer, ProducerContext};
+use rdkafka::producer::future_producer::OwnedDeliveryResult;
+use rdkafka::producer::{
+    BaseProducer, BaseRecord, DeliveryResult, FutureProducer, FutureRecord, Producer,
+    ProducerContext,
+};
+use rdkafka::types::RDKafkaErrorCode;
+use rdkafka::util::Timeout;
 use rdkafka::ClientContext;
-
 use std::cmp;
 use std::iter::{IntoIterator, Iterator};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 mod content;
-
-use self::content::CachedMessages;
-use super::config::{ProducerBenchmark, ProducerScenario, ProducerType};
-use super::units::{Bytes, Messages, Seconds};
 
 struct BenchmarkProducerContext {
     failure_counter: Arc<AtomicUsize>,
@@ -52,11 +53,21 @@ fn base_producer_thread(
         .client_config()
         .create_with_context(producer_context)
         .expect("Producer creation failed");
+    let base_record = BaseRecord {
+        topic: &scenario.topic,
+        partition: None,
+        payload: Some("warmup"),
+        key: None,
+        timestamp: None,
+        headers: None,
+        delivery_opaque: (),
+    };
+
     producer
-        .send_copy::<str, str>(&scenario.topic, None, Some("warmup"), None, (), None)
+        .send::<str, str>(base_record)
         .expect("Producer error");
     failure_counter.store(0, Ordering::Relaxed);
-    producer.flush(Duration::from_secs(10));
+    producer.flush(Duration::from_secs(10)).unwrap();
 
     let per_thread_messages = if thread_id == 0 {
         scenario.message_count - scenario.message_count / scenario.threads * (scenario.threads - 1)
@@ -70,19 +81,24 @@ fn base_producer_thread(
         .enumerate()
     {
         loop {
-            match producer.send_copy::<[u8], [u8]>(
-                &scenario.topic,
-                Some(count as i32 % 3),
-                Some(content),
-                None,
-                (),
-                None,
-            ) {
-                Err(KafkaError::MessageProduction(RDKafkaError::QueueFull)) => {
+            let base_record = BaseRecord {
+                topic: &scenario.topic,
+                partition: Some(count as i32 % 3),
+                payload: Some(content),
+                key: None,
+                timestamp: None,
+                headers: None,
+                delivery_opaque: (),
+            };
+
+            match producer.send::<[u8], [u8]>(base_record) {
+                Err((e, _record))
+                    if e.rdkafka_error_code() == Some(RDKafkaErrorCode::QueueFull) =>
+                {
                     producer.poll(Duration::from_millis(10));
                     continue;
                 }
-                Err(e) => {
+                Err((e, _record)) => {
                     println!("Error {:?}", e);
                     break;
                 }
@@ -91,40 +107,46 @@ fn base_producer_thread(
         }
         producer.poll(Duration::from_secs(0));
     }
-    producer.flush(Duration::from_secs(120));
+    producer.flush(Duration::from_secs(120)).unwrap();
     ThreadStats::new(start.elapsed(), failure_counter.load(Ordering::Relaxed))
 }
 
-fn wait_all(futures: Vec<DeliveryFuture>) -> usize {
+async fn wait_all(futures: &mut Vec<impl Future<Output = OwnedDeliveryResult> + Sized>) -> usize {
     let mut failures = 0;
-    for future in futures {
-        match future.wait() {
-            Ok(Err(e)) => {
-                println!("Kafka error: {:?}", e);
-                failures += 1;
-            }
-            Err(futures::Canceled) => {
-                println!("Future cancelled");
-                failures += 1;
-            }
-            Ok(_) => {}
+    for future in futures.drain(..) {
+        if let Err((kafka_error, _message)) = future.await {
+            println!("Kafka error: {:?}", kafka_error);
+            failures += 1;
         }
     }
     failures
 }
 
-fn future_producer_thread(
+async fn future_producer_thread(
     thread_id: u64,
     scenario: &ProducerScenario,
     cache: &CachedMessages,
 ) -> ThreadStats {
+    println!("Thread {} started", thread_id);
     let producer: FutureProducer<_> = scenario
         .client_config()
         .create()
         .expect("Producer creation failed");
-    let _ = producer
-        .send_copy::<str, str>(&scenario.topic, None, Some("warmup"), None, None, 1000)
-        .wait();
+
+    let base_record = FutureRecord {
+        topic: &scenario.topic,
+        partition: None,
+        payload: Some("warmup"),
+        key: None,
+        timestamp: None,
+        headers: None,
+    };
+    producer
+        .send_result::<str, str>(base_record)
+        .unwrap()
+        .await
+        .unwrap()
+        .unwrap();
 
     let per_thread_messages = if thread_id == 0 {
         scenario.message_count - scenario.message_count / scenario.threads * (scenario.threads - 1)
@@ -139,21 +161,22 @@ fn future_producer_thread(
         .take(per_thread_messages as usize)
         .enumerate()
     {
-        futures.push(producer.send_copy::<[u8], [u8]>(
-            &scenario.topic,
-            Some(count as i32 % 3),
-            Some(content),
-            None,
-            None,
-            -1,
-        ));
+        let future_record = FutureRecord {
+            topic: &scenario.topic,
+            partition: Some(count as i32 % 3),
+            payload: Some(content),
+            key: None,
+            timestamp: None,
+            headers: None,
+        };
+
+        futures.push(producer.send::<[u8], [u8], _>(future_record, Timeout::Never));
         if futures.len() >= 1_000_000 {
-            failures += wait_all(futures);
-            futures = Vec::with_capacity(1_000_000);
+            failures += wait_all(&mut futures).await;
         }
     }
-    failures += wait_all(futures);
-    producer.flush(Duration::from_secs(120));
+    failures += wait_all(&mut futures).await;
+    producer.flush(Duration::from_secs(120)).unwrap();
     ThreadStats::new(start.elapsed(), failures)
 }
 
@@ -163,40 +186,49 @@ pub fn run(config: &ProducerBenchmark, scenario_name: &str) {
         .get(scenario_name)
         .expect("The specified scenario cannot be found");
 
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .worker_threads(scenario.threads as usize)
+        .build()
+        .unwrap();
+
     let cache = Arc::new(CachedMessages::new(scenario.message_size, 1_000_000));
     println!(
         "Scenario: {}, repeat {} times, {} seconds pause after each",
         scenario_name, scenario.repeat_times, scenario.repeat_pause
     );
+    runtime.block_on(async {
+        let mut benchmark_stats = ProducerBenchmarkStats::new(scenario);
+        for i in 0..scenario.repeat_times {
+            let mut scenario_stats = ProducerRunStats::new(scenario);
 
-    let mut benchmark_stats = ProducerBenchmarkStats::new(scenario);
-    for i in 0..scenario.repeat_times {
-        let mut scenario_stats = ProducerRunStats::new(scenario);
-        let threads = (0..scenario.threads)
-            .map(|thread_id| {
+            let mut join_set = tokio::task::JoinSet::new();
+
+            for i in 0..scenario.threads {
                 let scenario = scenario.clone();
                 let cache = Arc::clone(&cache);
-                thread::spawn(move || match scenario.producer_type {
-                    ProducerType::BaseProducer => {
-                        base_producer_thread(thread_id, &scenario, &cache)
+                join_set.spawn(async move {
+                    match scenario.producer_type {
+                        ProducerType::BaseProducer => base_producer_thread(i, &scenario, &cache),
+                        ProducerType::FutureProducer => {
+                            future_producer_thread(i, &scenario, &cache).await
+                        }
                     }
-                    ProducerType::FutureProducer => {
-                        future_producer_thread(thread_id, &scenario, &cache)
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        for thread in threads {
-            let stats = thread.join();
-            scenario_stats.merge_thread_stats(&stats.unwrap());
+                });
+            }
+
+            for stats in join_set.join_all().await {
+                scenario_stats.merge_thread_stats(&stats);
+            }
+
+            scenario_stats.print();
+            benchmark_stats.add_stat(scenario_stats);
+            if i != scenario.repeat_times - 1 {
+                tokio::time::sleep(Duration::from_secs(scenario.repeat_pause)).await;
+            }
         }
-        scenario_stats.print();
-        benchmark_stats.add_stat(scenario_stats);
-        if i != scenario.repeat_times - 1 {
-            thread::sleep(Duration::from_secs(scenario.repeat_pause as u64))
-        }
-    }
-    benchmark_stats.print();
+        benchmark_stats.print();
+    });
 }
 
 #[derive(Debug)]

@@ -1,6 +1,5 @@
-use serde_yaml;
-
 use rdkafka::ClientConfig;
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -19,7 +18,7 @@ fn or_expect<T: Clone>(first: &Option<T>, second: &Option<T>, name: &str) -> T {
         .as_ref()
         .cloned()
         .or_else(|| second.clone())
-        .expect(&format!("Missing configuration parameter: {}", name))
+        .unwrap_or_else(|| panic!("Missing configuration parameter: {}", name))
 }
 
 //
